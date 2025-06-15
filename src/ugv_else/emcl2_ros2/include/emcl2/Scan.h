@@ -5,6 +5,7 @@
 #define EMCL2__SCAN_H_
 
 #include <iostream>
+#include <cstdint>
 #include <vector>
 
 namespace emcl2
