@@ -5,6 +5,7 @@
 #define EMCL2__POSE_H_
 
 #include <sstream>
+#include <cstdint>
 #include <string>
 
 namespace emcl2
