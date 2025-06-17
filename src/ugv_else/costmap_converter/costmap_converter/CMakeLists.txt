@@ -43,7 +43,7 @@ set(dependencies
  
 include_directories(
   include
-  /opt/ros/jazzy/include/cv_bridge/cv_bridge
+#  /opt/ros/jazzy/include/cv_bridge/cv_bridge
 )
  
 # Core costmap_converter library
