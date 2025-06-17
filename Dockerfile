@@ -36,6 +36,7 @@ RUN apt-get install -y \
     lsb-release \
     sudo \
     git \
+    nano \
     passwd \
     locales \
     iputils-ping \
