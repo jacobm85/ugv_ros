@@ -1,17 +1,17 @@
 cmake_minimum_required(VERSION 3.5)
 project(costmap_converter)
- 
+
 # Set to Release to speed up the build
 set(CMAKE_BUILD_TYPE Release)
- 
+
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 14)
 endif()
- 
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
- 
+
 find_package(ament_cmake REQUIRED)
 find_package(class_loader REQUIRED)
 find_package(costmap_converter_msgs REQUIRED)
@@ -25,7 +25,7 @@ find_package(OpenCV REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
- 
+
 set(dependencies
   class_loader
   costmap_converter_msgs
@@ -40,10 +40,12 @@ set(dependencies
   rclcpp
   rclcpp_components
 )
- 
-#fix misplaced for jazzy
-include_directories(/opt/ros/jazzy/include/cv_bridge)
- 
+
+include_directories(
+  include
+  /opt/ros/jazzy/include/cv_bridge/cv_bridge
+)
+
 # Core costmap_converter library
 add_library(costmap_converter SHARED
   src/costmap_to_polygons.cpp 
@@ -57,22 +59,22 @@ add_library(costmap_converter SHARED
   src/costmap_to_dynamic_obstacles/multitarget_tracker/Kalman.cpp
   src/costmap_to_dynamic_obstacles/multitarget_tracker/HungarianAlg.cpp
 )
- 
+
 ament_target_dependencies(costmap_converter ${dependencies})
- 
+
 # Register costmap_converter_node as a component (NOT an executable)
 add_library(costmap_converter_node SHARED
   src/costmap_converter_node.cpp
 )
- 
+
 ament_target_dependencies(costmap_converter_node ${dependencies})
- 
+
 target_link_libraries(costmap_converter_node costmap_converter)
- 
+
 rclcpp_components_register_nodes(costmap_converter_node
   "CostmapStandaloneConversion"
 )
- 
+
 # Installation
 install(TARGETS
   costmap_converter
@@ -81,17 +83,17 @@ install(TARGETS
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
 )
- 
+
 install(DIRECTORY include/
   DESTINATION include/
 )
- 
+
 ament_export_include_directories(include)
 ament_export_libraries(costmap_converter)
 ament_export_dependencies(${dependencies})
- 
+
 pluginlib_export_plugin_description_file(costmap_converter costmap_converter_plugins.xml)
- 
+
 # Optional: Unit test
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -101,6 +103,6 @@ if(BUILD_TESTING)
   endif()
   ament_target_dependencies(test_costmap_polygons ${dependencies})
 endif()
- 
+
 ament_package()
- 
+

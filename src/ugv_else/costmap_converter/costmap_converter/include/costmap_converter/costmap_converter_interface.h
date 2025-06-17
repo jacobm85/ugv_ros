@@ -86,6 +86,14 @@ public:
      */
     virtual void initialize(rclcpp::Node::SharedPtr nh) {
       nh_ = nh;
+      nh_->declare_parameter("cluster_max_distance",
+                      rclcpp::ParameterValue(0.4));
+      nh_->declare_parameter("cluster_min_pts",
+                      rclcpp::ParameterValue(2));
+      nh_->declare_parameter("cluster_max_pts",
+                      rclcpp::ParameterValue(30));
+      nh_->declare_parameter("convex_hull_min_pt_separation",
+                      rclcpp::ParameterValue(0.1));
     }
     
     /**
@@ -136,7 +144,7 @@ public:
    * @return Shared instance of the current obstacle container
    * @sa getPolygons
    */
-    virtual ObstacleArrayConstPtr getObstacles()
+    virtual ObstacleArrayPtr getObstacles()
     {
       ObstacleArrayPtr obstacles = std::make_shared<costmap_converter_msgs::msg::ObstacleArrayMsg>();
       PolygonContainerConstPtr polygons = getPolygons();
@@ -194,7 +202,7 @@ public:
       
       if (spin_thread)
       {
-        RCLCPP_DEBUG(nh_->get_logger(), "costmap_converter", "Spinning up a thread for the CostmapToPolygons plugin");
+        RCLCPP_DEBUG(nh_->get_logger(), "costmap_converter.\n Spinning up a thread for the CostmapToPolygons plugin");
         need_to_terminate_ = false;
         
         worker_timer_ = nh_->create_wall_timer(
@@ -227,6 +235,14 @@ public:
         delete spin_thread_;
       }
     }
+    /**
+     * @brief The callback of the worker that performs the actual work (updating the costmap and converting it to polygons)
+     */
+    void workerCallback()
+    {
+      updateCostmap2D();
+      compute();
+    }
 
 protected:
   
@@ -242,6 +258,7 @@ protected:
      */
     void spinThread()
     {
+      rclcpp::WallRate r(10);
       while (rclcpp::ok())
       {
         {
@@ -249,18 +266,11 @@ protected:
           if (need_to_terminate_)
             break;
           rclcpp::spin_some(nh_);
+          r.sleep();
         }
       }
     }
-    
-    /**
-     * @brief The callback of the worker that performs the actual work (updating the costmap and converting it to polygons)
-     */
-    void workerCallback()
-    {
-      updateCostmap2D();
-      compute();
-    }
+
 
     rclcpp::Logger getLogger() const
     {
@@ -310,7 +320,7 @@ public:
 //      std::string raw_plugin_name = static_converter_loader_.getName(plugin_name);
       static_costmap_converter_->initialize(nh_parent);
       setStaticCostmapConverterPlugin(static_costmap_converter_);
-      RCLCPP_INFO(getLogger(), "CostmapToDynamicObstacles: underlying costmap conversion plugin for static obstacles %s loaded.", plugin_name);
+      RCLCPP_INFO(getLogger(), "CostmapToDynamicObstacles: underlying costmap conversion plugin for static obstacles %s loaded.", plugin_name.c_str());
     }
     catch(const pluginlib::PluginlibException& ex)
     {
@@ -385,3 +395,4 @@ private:
 
 
 #endif // end COSTMAP_CONVERTER_INTERFACE_H_
+

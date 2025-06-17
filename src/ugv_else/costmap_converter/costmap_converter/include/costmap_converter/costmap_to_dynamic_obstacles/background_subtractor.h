@@ -113,3 +113,4 @@ private:
 };
 
 #endif // BACKGROUNDSUBTRACTOR_H_
+
