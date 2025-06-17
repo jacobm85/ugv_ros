@@ -50,7 +50,7 @@
 #include <rclcpp/rclcpp.hpp>
 
 // OpenCV
-#include <cv_bridge/cv_bridge.h>
+#include <cv_bridge/cv_bridge.hpp>
 #include <opencv2/features2d/features2d.hpp>
 #include <opencv2/video/tracking.hpp>
 
@@ -118,7 +118,7 @@ public:
    * method returns an empty instance!
    * @return Shared instance of the current obstacle container
    */
-  ObstacleArrayConstPtr getObstacles();
+  ObstacleArrayPtr getObstacles();
 
   /**
    * @brief Set name of robot's odometry topic
