@@ -1,80 +1,138 @@
-# Set the ROS distribution as an argument, defaulting to 'jazzy'
-ARG ROS_DISTRO=jazzy
+# Use Ubuntu Noble LTS as base
+ARG RELEASE=noble
+FROM ubuntu:${RELEASE}
 
-# The base image comes from the official ROS repository hosted on Docker Hub
-# You can find available ROS images here: https://hub.docker.com/_/ros/tags
-# We're using the ros-base image which includes core ROS 2 packages
-FROM ros:${ROS_DISTRO}-ros-base
-
-# Set the default shell to bash for RUN commands
-# This ensures all RUN commands use bash instead of sh
+# Use bash as default shell
 SHELL ["/bin/bash", "-c"]
 
-# Update the system and install essential tools
-# This step upgrades all packages and installs utilities needed for development
-RUN apt-get update -q && \
-    apt-get upgrade -yq && \
-    apt-get install -yq --no-install-recommends apt-utils wget curl git build-essential \
-    vim sudo lsb-release locales bash-completion tzdata gosu gedit htop nano libserial-dev
+# Environment setup
+ENV DEBIAN_FRONTEND=noninteractive
+ENV USERNAME=ubuntu
+ENV USER_UID=1000
+ENV USER_GID=1000
+ENV ROS_DISTRO=jazzy
+ENV BOT_HOME=/home/${USERNAME}
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US:en
+ENV LC_ALL=en_US.UTF-8
 
-# Install additional tools required for ROS 2 development
-# These packages help with building and managing ROS 2 workspaces
-RUN apt-get update -q && \
-    apt-get install -y gnupg2 iputils-ping usbutils \
-    python3-argcomplete python3-colcon-common-extensions python3-networkx python3-pip python3-colcon-mixin python3-rosdep python3-vcstool python3-serial
 
-# Set locale
-ENV LANG=C.UTF-8
-ENV LC_ALL=C.UTF-8
+# Enable universe repo and update
+RUN apt-get update && apt-get install -y software-properties-common && \
+    add-apt-repository universe && \
+    apt-get update && apt-get install -y curl
+	
+# Add ROS 2 Jazzy apt source
+RUN curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/ros-archive-keyring.gpg && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros2.list && \
+    apt-get update && apt-get install -y ros-dev-tools
 
-# Set up the ROS 2 environment
-# This ensures that ROS 2 commands are available in the shell
-# rosdep is a tool for installing system dependencies for ROS packages
-RUN rosdep update && \
-    grep -F "source /opt/ros/${ROS_DISTRO}/setup.bash" /root/.bashrc || echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc && \
-    grep -F "source /usr/share/colcon_argcomplete/hook/colcon-argcomplete.bash" /root/.bashrc || echo "source /usr/share/colcon_argcomplete/hook/colcon-argcomplete.bash" >> /root/.bashrc
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y ros-${ROS_DISTRO}-desktop
 
-RUN /bin/sh -c colcon mixin add default https://raw.githubusercontent.com/colcon/colcon-mixin-repository/master/index.yaml \
-    && colcon mixin update \
-    && colcon metadata add default https://raw.githubusercontent.com/colcon/colcon-metadata-repository/master/index.yaml \
-    && colcon metadata update
+# Install system dependencies
+RUN apt-get install -y \
+    gnupg2 \
+    lsb-release \
+    sudo \
+    git \
+    passwd \
+    locales \
+    iputils-ping \
+    usbutils \
+    python3-argcomplete \
+    python3-colcon-common-extensions \
+    python3-networkx \
+    python3-pip \
+    python3-opencv \
+    python3-colcon-mixin \
+    python3-rosdep \
+    python3-vcstool \
+    python3-serial \
+    python3-pygame \
+    python3-lgpio \
+    python3-flask \
+    python3-requests \
+    libopencv-dev && \
+    locale-gen en_US.UTF-8 && \
+    update-locale LANG=en_US.UTF-8
 
-# Install additional ROS 2 packages
-RUN apt-get update && \
-    apt-get install -y \
-    ros-${ROS_DISTRO}-xacro \
+
+# Install additional ROS packages
+RUN apt-get install -y \
     ros-${ROS_DISTRO}-ros2-control \
     ros-${ROS_DISTRO}-ros2-controllers \
-    ros-${ROS_DISTRO}-teleop-twist-keyboard \
-    ros-${ROS_DISTRO}-twist-mux \
     ros-${ROS_DISTRO}-navigation2 \
     ros-${ROS_DISTRO}-nav2-bringup \
     ros-${ROS_DISTRO}-slam-toolbox \
-    ros-${ROS_DISTRO}-rosbridge-suite \
     ros-${ROS_DISTRO}-rtabmap \
-    ros-${ROS_DISTRO}-usb-cam
+    ros-${ROS_DISTRO}-usb-cam \
+    ros-${ROS_DISTRO}-cartographer \
+    ros-${ROS_DISTRO}-velodyne \
+    ros-${ROS_DISTRO}-image-geometry \
+    ros-${ROS_DISTRO}-cv-bridge \
+    ros-${ROS_DISTRO}-depthai-* \
+    ros-${ROS_DISTRO}-cartographer-* \
+    ros-${ROS_DISTRO}-joint-state-publisher-* \
+    ros-${ROS_DISTRO}-nav2-* \
+    ros-${ROS_DISTRO}-rosbridge-* \
+    ros-${ROS_DISTRO}-rqt-* \
+    ros-${ROS_DISTRO}-rtabmap-* && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* 
+
+# Dont run this now - Conditionally initialize rosdep
+#RUN [ -f /etc/ros/rosdep/sources.list.d/20-default.list ] || (rosdep init && rosdep update)
+
+# Create user 'ugv' and set password
+#RUN if ! getent group ${USER_GID} >/dev/null; then \
+#        groupadd --gid ${USER_GID} ${USERNAME}; \
+#    fi && \
+#    useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USERNAME} -s /bin/bash && \
+#    echo "${USERNAME}:${USERNAME}" | chpasswd
+RUN usermod -aG sudo ${USERNAME}
 
 
-# Create the ROS2 workspace and clone repository
-RUN mkdir -p ~/ugv_ws \
-    && cd ~/ugv_ws \
-    && git clone -b ros2-humble-develop https://github.com/jacobm85/ugv_ros.git
+# Set up ROS environment for ugv user
+RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /home/${USERNAME}/.bashrc && \
+    echo "eval \"\$(register-python-argcomplete ros2)\"" >> /home/${USERNAME}/.bashrc && \
+    echo "eval \"\$(register-python-argcomplete colcon)\"" >> /home/${USERNAME}/.bashrc
 
-# Make scripts executable
-RUN chmod +x ~/ugv_ws/ugv_ros/ros_entrypoint.sh /ros_entrypoint.shh
+# Switch to ugv user and set up workspace
+USER ${USERNAME}
+WORKDIR /home/${USERNAME}
 
-# Run the workspace setup script
-# This typically installs workspace dependencies and builds the ROS 2 packages
-WORKDIR /
-RUN ./workspace.sh
+# Clone and set up workspace
+RUN mkdir -p /home/${USERNAME}/ugv_ws/src && \
+    cd /home/${USERNAME}/ugv_ws && \
+    git clone https://github.com/jacobm85/ugv_ros /tmp/ugv_ros && \
+    mv /tmp/ugv_ros/* /home/${USERNAME}/ugv_ws/src/ && \
+    rm -rf /tmp/ugv_ros
 
-# Source ROS setup files for environment setup
-RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> ~/.bashrc
+# Build workspace (explicit source in each RUN)
+WORKDIR /home/${USERNAME}/ugv_ws
+RUN /bin/bash -c "source /opt/ros/${ROS_DISTRO}/setup.bash && \
+    colcon build --packages-select \
+        emcl2 explore_lite openslam_gmapping \
+        slam_gmapping ldlidar rf2o_laser_odometry robot_pose_publisher \
+        vizanti vizanti_cpp vizanti_demos vizanti_msgs vizanti_server \
+        ugv_base_node ugv_interface && \
+    colcon build --packages-select \
+        ugv_bringup ugv_chat_ai ugv_description ugv_gazebo ugv_nav ugv_slam \
+        ugv_tools ugv_vision ugv_web_app --symlink-install && \
+    colcon build --packages-select \
+        costmap_converter_msgs costmap_converter teb_msgs teb_local_planner"
 
-# Set the entrypoint for the container
-# This script will be run every time the container starts
-ENTRYPOINT ["/entrypoint.sh"]
+# Add workspace setup to bashrc
+RUN echo "source /home/${USERNAME}/ugv_ws/install/setup.bash" >> /home/${USERNAME}/.bashrc
 
-# Set the default command
-# This keeps the container running indefinitely, allowing you to exec into it
-CMD ["/bin/bash", "-c", "tail -f /dev/null"]
+# Fix ownership
+USER root
+RUN chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
+
+# Fix USB udev permissions
+RUN echo 'SUBSYSTEM=="usb", ATTRS{idVendor}=="03e7", MODE="0666"' > /etc/udev/rules.d/80-movidius.rules
+
+# Final config
+USER ${USERNAME}
+WORKDIR /home/${USERNAME}
+CMD ["/bin/bash"]
