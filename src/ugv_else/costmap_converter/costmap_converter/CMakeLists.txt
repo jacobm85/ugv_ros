@@ -41,10 +41,10 @@ set(dependencies
   rclcpp_components
 )
  
-include_directories(
-  include
-  /opt/ros/jazzy/include/cv_bridge/cv_bridge
-)
+##include_directories(
+#  include
+#  /opt/ros/jazzy/include/cv_bridge/cv_bridge
+#)
  
 # Core costmap_converter library
 add_library(costmap_converter SHARED
