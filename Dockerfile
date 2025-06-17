@@ -102,10 +102,10 @@ USER ${USERNAME}
 WORKDIR /home/${USERNAME}
 
 # Clone and set up workspace
-RUN mkdir -p /home/${USERNAME}/ugv_ws/src && \
+RUN mkdir -p /home/${USERNAME}/ugv_ws && \
     cd /home/${USERNAME}/ugv_ws && \
     git clone https://github.com/jacobm85/ugv_ros /tmp/ugv_ros && \
-    mv /tmp/ugv_ros/* /home/${USERNAME}/ugv_ws/src/ && \
+    mv /tmp/ugv_ros/* /home/${USERNAME}/ugv_ws/ && \
     rm -rf /tmp/ugv_ros
 
 # Build workspace (explicit source in each RUN)
@@ -133,6 +133,10 @@ RUN chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
 RUN echo 'SUBSYSTEM=="usb", ATTRS{idVendor}=="03e7", MODE="0666"' > /etc/udev/rules.d/80-movidius.rules
 
 # Final config
+RUN cp /home/${USERNAME}/ugv_ws/ros_entrypoint.sh /ros_entrypoint.sh && \
+    chmod +x /home/${USERNAME}/ugv_ws/ros_entrypoint.sh /ros_entrypoint.sh
+# Set the entrypoint for the container
+ENTRYPOINT ["/ros_entrypoint.sh"]
 USER ${USERNAME}
 WORKDIR /home/${USERNAME}
 CMD ["/bin/bash"]
