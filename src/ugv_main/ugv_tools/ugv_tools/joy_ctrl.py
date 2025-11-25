@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
-import os
 import time
 import getpass
 import rclpy
@@ -18,7 +17,7 @@ class JoyTeleop(Node):
         super().__init__(name)
 
         # Internal states
-        self.joy_active = True     # Robot körs direkt
+        self.joy_active = True
         self.buzzer_active = False
         self.led_on_io4 = False
         self.led_on_io5 = False
@@ -41,27 +40,27 @@ class JoyTeleop(Node):
         # Subscription
         self.sub_joy = self.create_subscription(Joy, 'joy', self.button_callback, 10)
 
-        # Declare parameters
+        # Base speed limits
         self.declare_parameter('xspeed_limit', 0.2)
         self.declare_parameter('yspeed_limit', 0.2)
         self.declare_parameter('angular_speed_limit', 0.5)
 
-        self.xspeed_limit = self.get_parameter('xspeed_limit').value
-        self.yspeed_limit = self.get_parameter('yspeed_limit').value
-        self.angular_speed_limit = self.get_parameter('angular_speed_limit').value
+        self.xspeed_limit = float(self.get_parameter('xspeed_limit').value)
+        self.yspeed_limit = float(self.get_parameter('yspeed_limit').value)
+        self.angular_speed_limit = float(self.get_parameter('angular_speed_limit').value)
 
         # Debug state
         self.prev_axes = None
         self.prev_buttons = None
         self.last_print_time = 0
 
-        # SWECOGPT: BEGIN state and params for turret hold-position
+        # Pan-tilt state
         self.pt_pan_deg = 0.0
         self.pt_tilt_deg = 0.0
         self._pt_last_time = time.time()
 
-        # Parameters (override via ROS2 params if wanted)
-        self.declare_parameter('pt_pan_speed_deg_s', 120.0)   # speed at full stick
+        # Pan-tilt params
+        self.declare_parameter('pt_pan_speed_deg_s', 120.0)
         self.declare_parameter('pt_tilt_speed_deg_s', 120.0)
         self.declare_parameter('pt_pan_min_deg', -180.0)
         self.declare_parameter('pt_pan_max_deg', 180.0)
@@ -76,18 +75,19 @@ class JoyTeleop(Node):
         self.pt_tilt_min = float(self.get_parameter('pt_tilt_min_deg').value)
         self.pt_tilt_max = float(self.get_parameter('pt_tilt_max_deg').value)
         self.pt_deadzone = float(self.get_parameter('pt_deadzone').value)
-        # SWECOGPT: END state and params for turret hold-position
-        
-        # SWECOGPT: BEGIN optional center offsets (default 0 deg)
+
+        # Center offsets
         self.declare_parameter('pt_pan_center_deg', 0.0)
         self.declare_parameter('pt_tilt_center_deg', 0.0)
         self.pt_pan_center = float(self.get_parameter('pt_pan_center_deg').value)
         self.pt_tilt_center = float(self.get_parameter('pt_tilt_center_deg').value)
-        # SWECOGPT: END optional center offsets
 
-    # ----------------------------------------------------
-    # MAIN JOYSTICK CALLBACK
-    # ----------------------------------------------------
+        # Slow mode (L2/LT)
+        self.declare_parameter('slow_factor_base', 0.35)
+        self.declare_parameter('axis_l2_index', 2)
+        self.slow_factor_base = float(self.get_parameter('slow_factor_base').value)
+        self.axis_l2_index = int(self.get_parameter('axis_l2_index').value)
+
     def button_callback(self, joy_data):
         logger = get_logger("JoyTeleop")
         axes = joy_data.axes
@@ -100,41 +100,40 @@ class JoyTeleop(Node):
                 logger.info(f"Axes: {axes}")
                 logger.info(f"Buttons: {buttons}")
                 self.last_print_time = now
-
         self.prev_axes = list(axes)
         self.prev_buttons = list(buttons)
 
         def pressed(idx):
             return len(buttons) > idx and buttons[idx] == 1
 
-        # ----------------------------------------------------
-        # ROBOT BASE CONTROL  (LEFT STICK + D-PAD)
-        # ----------------------------------------------------
-        left_x = self.filter_data(axes[0])   # left stick horizontal
-        left_y = self.filter_data(axes[1])   # left stick vertical
-
+        # Base control (left stick + D-pad) + slow mode
+        left_x = self.filter_data(axes[0]) if len(axes) > 0 else 0.0
+        left_y = self.filter_data(axes[1]) if len(axes) > 1 else 0.0
         dpad_x = axes[6] if len(axes) > 6 else 0.0
         dpad_y = axes[7] if len(axes) > 7 else 0.0
 
-        # Merge: left stick has priority
         move_x = left_y if abs(left_y) > 0.1 else dpad_y
         move_z = left_x if abs(left_x) > 0.1 else dpad_x
 
-        twist = Twist()
-        twist.linear.x = move_x * self.xspeed_limit * self.linear_gear
-        twist.angular.z = move_z * self.angular_speed_limit * self.angular_gear
+        vx_cmd = move_x * self.xspeed_limit * self.linear_gear
+        wz_cmd = move_z * self.angular_speed_limit * self.angular_gear
 
+        l2_val = axes[self.axis_l2_index] if len(axes) > self.axis_l2_index else 0.0
+        if self.trigger_pressed(l2_val):
+            vx_cmd *= self.slow_factor_base
+            wz_cmd *= self.slow_factor_base
+
+        twist = Twist()
+        twist.linear.x = vx_cmd
+        twist.angular.z = wz_cmd
         if self.joy_active:
             self.pub_cmd_vel.publish(twist)
 
-        # ----------------------------------------------------
-        # PAN-TILT TURRET CONTROL  (RIGHT STICK)
-        # ----------------------------------------------------
+        # Pan-tilt (right stick)
         if len(axes) >= 5:
-            right_x = float(axes[3])  # SWECOGPT: use raw right stick to avoid double-deadzone
+            right_x = float(axes[3])
             right_y = float(axes[4])
 
-            # SWECOGPT: BEGIN integrate to hold position, only right stick affects turret
             now = time.time()
             dt = max(1e-3, min(0.2, now - self._pt_last_time))
             self._pt_last_time = now
@@ -145,61 +144,46 @@ class JoyTeleop(Node):
             rx = dz(right_x, self.pt_deadzone)
             ry = dz(right_y, self.pt_deadzone)
 
-            # Integrate angles (deg)
             self.pt_pan_deg += rx * self.pt_pan_speed * dt
             self.pt_tilt_deg += ry * self.pt_tilt_speed * dt
 
-            # Clamp limits
             self.pt_pan_deg = max(self.pt_pan_min, min(self.pt_pan_max, self.pt_pan_deg))
             self.pt_tilt_deg = max(self.pt_tilt_min, min(self.pt_tilt_max, self.pt_tilt_deg))
 
-            # Publish normalized to match ugv_driver (driver multiplies by 180)
             pan_tilt = Float32MultiArray()
             pan_tilt.data = [self.pt_pan_deg / 180.0, self.pt_tilt_deg / 180.0]
             self.pub_pan_tilt.publish(pan_tilt)
-            # SWECOGPT: END integrate to hold position
 
-        # ----------------------------------------------------
-        # CENTER TURRET (Y button)
-        # ----------------------------------------------------
-        if pressed(10):  # Y button index 3
+        # Pan/tilt home (index 10)
+        if pressed(10):
             self.center_turret()
 
-        # ----------------------------------------------------
-        # LIGHTS
-        # ----------------------------------------------------
-        # X ? IO4 (chassi LED)
-        if pressed(2):   # X button (index 2 for Xbox controller)
+        # Lights
+        if pressed(2):    # X → IO4
             self.toggle_io4()
-
-        # A ? IO5 (turret LED)
-        if pressed(0):   # A button (index 0)
+        if pressed(0):    # A → IO5
             self.toggle_io5()
 
-        # ----------------------------------------------------
-        # NAV CANCEL (press left stick button)
-        # ----------------------------------------------------
+        # Nav cancel (left stick button = 9)
         if pressed(9):
             self.cancel_nav()
 
-        # ----------------------------------------------------
-        # Buzzer (right stick button)
-        # ----------------------------------------------------
-        if pressed(10):
+        # Buzzer på B (index 1)
+        if pressed(1):
             self.buzzer_toggle()
 
-    # ----------------------------------------------------
-    # HELPERS
-    # ----------------------------------------------------
+    # Helpers
     def toggle_io4(self):
         now = time.time()
         if now - self.last_led_toggle_time < 0.3:
             return
         self.last_led_toggle_time = now
-
         self.led_on_io4 = not self.led_on_io4
         msg = Float32MultiArray()
-        msg.data = [255 if self.led_on_io4 else 0, 0]
+        msg.data = [
+            255 if self.led_on_io4 else 0,
+            255 if self.led_on_io5 else 0
+        ]
         self.pub_led_ctrl.publish(msg)
 
     def toggle_io5(self):
@@ -207,10 +191,12 @@ class JoyTeleop(Node):
         if now - self.last_led_toggle_time < 0.3:
             return
         self.last_led_toggle_time = now
-
         self.led_on_io5 = not self.led_on_io5
         msg = Float32MultiArray()
-        msg.data = [0, 255 if self.led_on_io5 else 0]
+        msg.data = [
+            255 if self.led_on_io4 else 0,
+            255 if self.led_on_io5 else 0
+        ]
         self.pub_led_ctrl.publish(msg)
 
     def filter_data(self, val):
@@ -227,27 +213,26 @@ class JoyTeleop(Node):
         if now - self.cancel_time < 0.5:
             return
         self.cancel_time = now
-
         self.joy_active = not self.joy_active
         msg = Bool()
         msg.data = self.joy_active
         self.pub_joy_state.publish(msg)
-
-        # Stop robot immediately when toggled off
         if not self.joy_active:
             self.pub_cmd_vel.publish(Twist())
 
-    # SWECOGPT: BEGIN helper to center turret
     def center_turret(self):
-        # Sätt interna absoluta vinklar till center
         self.pt_pan_deg = self.pt_pan_center
         self.pt_tilt_deg = self.pt_tilt_center
-    
-        # Publicera direkt (normaliserat [-1..1])
         msg = Float32MultiArray()
         msg.data = [self.pt_pan_deg / 180.0, self.pt_tilt_deg / 180.0]
         self.pub_pan_tilt.publish(msg)
-    # SWECOGPT: END helper to center turret
+
+    def trigger_pressed(self, val: float, threshold: float = 0.6) -> bool:
+        if -1.0 <= val <= 1.0:
+            pressed = (1.0 - val) / 2.0  # 1.0->0, -1.0->1
+        else:
+            pressed = val
+        return pressed >= threshold
 
 
 def main():
