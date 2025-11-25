@@ -17,7 +17,7 @@ def is_jetson():
 if is_jetson():
     serial_port = '/dev/ttyTHS1'
 else:
-    serial_port = '/dev/ttyAMA0' #Kan ändras
+    serial_port = '/dev/ttyAMA0'
 
 # Initialize serial communication with the UGV
 ser = serial.Serial(serial_port, 115200, timeout=1)
@@ -37,6 +37,23 @@ class UgvDriver(Node):
 
         # Subscribe to voltage data (voltage topic)
         self.voltage_sub = self.create_subscription(Float32, 'voltage', self.voltage_callback, 10)
+
+        # Subscribe to pan-tilt commands
+        self.pan_tilt_sub = self.create_subscription(
+            Float32MultiArray,
+            'ugv/pan_tilt_cmd',
+            self.pan_tilt_callback,
+            10
+        )
+        self.current_pan = 0.0   # 0–1
+        self.current_tilt = 0.0  # 0–1
+
+        # SWECOGPT: BEGIN parameter to avoid conflicts between joint_states and turret commands
+        # If True, forward ugv/joint_states to UGV (type 134). Default False to prevent overriding pan/tilt cmd.
+        self.declare_parameter('forward_joint_states_to_ugv', False)
+        self.forward_joint_states_to_ugv = bool(self.get_parameter('forward_joint_states_to_ugv').value)
+        # SWECOGPT: END parameter to avoid conflicts
+
 
     # Callback for processing velocity commands
     def cmd_vel_callback(self, msg):
@@ -74,16 +91,18 @@ class UgvDriver(Node):
         x_degree = (180 * x_rad) / 3.1415926
         y_degree = (180 * y_rad) / 3.1415926
 
-        # Send the joint data as a JSON string to the UGV
-        joint_data = json.dumps({
-            'T': 134, 
-            'X': x_degree, 
-            'Y': y_degree, 
-            "SX": 600,
-            "SY": 600,
-        }) + "\n"
-                
-        ser.write(joint_data.encode())
+        # SWECOGPT: BEGIN only forward joint_states if explicitly enabled to avoid overriding turret commands
+        if self.forward_joint_states_to_ugv:
+            # Send the joint data as a JSON string to the UGV
+            joint_data = json.dumps({
+                'T': 134, 
+                'X': x_degree, 
+                'Y': y_degree, 
+                "SX": 600,
+                "SY": 600,
+            }) + "\n"
+            ser.write(joint_data.encode())
+        # SWECOGPT: END conditional forwarding
 
     # Callback for processing LED control commands
     def led_ctrl_callback(self, msg):
@@ -98,6 +117,31 @@ class UgvDriver(Node):
         }) + "\n"
                 
         ser.write(led_ctrl_data.encode())
+        
+    #Skapa callback-metoden för pan-tilt
+    def pan_tilt_callback(self, msg):
+        if len(msg.data) < 2:
+            self.get_logger().warn("Pan-tilt command has less than 2 values")
+            return
+    
+        pan = float(msg.data[0])
+        tilt = float(msg.data[1])
+    
+        # Konvertera till grader om ditt torn kräver det
+        pan_deg = pan * 180
+        tilt_deg = tilt * 180
+    
+        # Skicka som JSON precis som LED och joint_states
+        pan_tilt_data = json.dumps({
+            'T': 134,   # samma typ som i joint_states om det är samma format
+            'X': pan_deg,
+            'Y': tilt_deg,
+            "SX": 600,  # speed, samma som joint_states
+            "SY": 600,
+        }) + "\n"
+    
+        ser.write(pan_tilt_data.encode())
+
 
     # Callback for processing voltage data
     def voltage_callback(self, msg):
