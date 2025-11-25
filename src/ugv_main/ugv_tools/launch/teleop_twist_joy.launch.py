@@ -14,11 +14,23 @@ from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 def generate_launch_description():
-                                   
+
+    # Allow overriding which device to use (eventX or js0)
+    declare_device_arg = DeclareLaunchArgument(
+        "device",
+        default_value="/dev/input/event2",
+        description="Joystick input device (e.g., /dev/input/event2 or /dev/input/js0)"
+    )
+
     # Create a node to read joystick input
     joy_node = Node(
         package='joy',
         executable='joy_node',
+        parameters=[
+            {"device": LaunchConfiguration("device")},
+            {"deadzone": 0.1},
+            {"autorepeat_rate": 0.0},
+        ]
     )
 
     # Create a node to control the robot using joystick input
@@ -29,7 +41,7 @@ def generate_launch_description():
 
     # Return the launch description
     return LaunchDescription([
+        declare_device_arg,
         joy_node,
         joy_ctrl_node
     ])
-
