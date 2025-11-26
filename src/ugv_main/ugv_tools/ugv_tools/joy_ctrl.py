@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
+import os
 import time
 import getpass
+import subprocess
 import rclpy
 from rclpy.node import Node
 from rclpy.logging import get_logger
@@ -87,6 +89,12 @@ class JoyTeleop(Node):
         self.declare_parameter('axis_l2_index', 2)
         self.slow_factor_base = float(self.get_parameter('slow_factor_base').value)
         self.axis_l2_index = int(self.get_parameter('axis_l2_index').value)
+        
+        # Video recording state
+        self.recording = False
+        self.ffmpeg_proc = None
+        self.video_dir = "/home/" + self.user_name + "/Videos"
+        os.makedirs(self.video_dir, exist_ok=True)
 
     def button_callback(self, joy_data):
         logger = get_logger("JoyTeleop")
@@ -172,19 +180,24 @@ class JoyTeleop(Node):
         if pressed(1):
             self.buzzer_toggle()
 
-    # Helpers
+        # RECORD TO MP4 (Y button)  (index 3 på Xbox/USB)
+        if pressed(3):
+            now = time.time()
+            if not hasattr(self, "_last_record_toggle") or (now - self._last_record_toggle) > 0.3:
+                self._last_record_toggle = now
+                if self.recording:
+                    self.stop_recording()
+                else:
+                    self.start_recording()
+
+    # ---------------- Helpers ----------------
     def toggle_io4(self):
         now = time.time()
         if now - self.last_led_toggle_time < 0.3:
             return
         self.last_led_toggle_time = now
         self.led_on_io4 = not self.led_on_io4
-        msg = Float32MultiArray()
-        msg.data = [
-            255 if self.led_on_io4 else 0,
-            255 if self.led_on_io5 else 0
-        ]
-        self.pub_led_ctrl.publish(msg)
+        self.publish_led_state()
 
     def toggle_io5(self):
         now = time.time()
@@ -192,12 +205,7 @@ class JoyTeleop(Node):
             return
         self.last_led_toggle_time = now
         self.led_on_io5 = not self.led_on_io5
-        msg = Float32MultiArray()
-        msg.data = [
-            255 if self.led_on_io4 else 0,
-            255 if self.led_on_io5 else 0
-        ]
-        self.pub_led_ctrl.publish(msg)
+        self.publish_led_state()
 
     def filter_data(self, val):
         return 0.0 if abs(val) < 0.5 else val
@@ -229,10 +237,69 @@ class JoyTeleop(Node):
 
     def trigger_pressed(self, val: float, threshold: float = 0.6) -> bool:
         if -1.0 <= val <= 1.0:
-            pressed = (1.0 - val) / 2.0  # 1.0->0, -1.0->1
+            pressed = (1.0 - val) / 2.0
         else:
             pressed = val
         return pressed >= threshold
+
+    # ---------------- Recording ----------------
+    def start_recording(self):
+        if getattr(self, 'recording', False):
+            return
+    
+        os.makedirs(self.video_dir, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"{self.video_dir}/ugv_{timestamp}.mp4"
+
+        self.blink_io4(times=2, interval=0.2)
+
+        self.ffmpeg_proc = subprocess.Popen([
+            "ffmpeg", "-y",
+            "-f", "v4l2",
+            "-input_format", "mjpeg",
+            "-framerate", "15",
+            "-video_size", "2592x1944",
+            "-i", "/dev/video0",
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-crf", "22",
+            filename
+        ])
+        self.recording = True
+        self.get_logger().info(f"Started recording: {filename}")
+
+    def stop_recording(self):
+        if not getattr(self, 'recording', False) or not getattr(self, 'ffmpeg_proc', None):
+            return
+        self.ffmpeg_proc.terminate()
+        try:
+            self.ffmpeg_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.ffmpeg_proc.kill()
+        self.ffmpeg_proc = None
+        self.recording = False
+        self.get_logger().info("Stopped recording")
+
+        self.blink_io4(times=2, interval=0.2)
+
+    # ---------------- LED helpers ----------------
+    def blink_io4(self, times=2, interval=0.2):
+        original_state = self.led_on_io4
+        for _ in range(times):
+            self.led_on_io4 = not original_state
+            self.publish_led_state()
+            time.sleep(interval)
+            self.led_on_io4 = original_state
+            self.publish_led_state()
+            time.sleep(interval)
+
+    def publish_led_state(self):
+        msg = Float32MultiArray()
+        msg.data = [
+            255 if self.led_on_io4 else 0,
+            255 if self.led_on_io5 else 0
+        ]
+        self.pub_led_ctrl.publish(msg)
 
 
 def main():
